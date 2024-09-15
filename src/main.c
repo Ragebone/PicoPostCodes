@@ -79,23 +79,30 @@ uint32_t reverse_nibbles(uint32_t in_val) {
     }
     return out_val;
 }
-
-int init_lpc_bus_sniffer(PIO pio) {
-    uint offset;
-
+/***
+ *
+ * Param pio: the PIO HW to add the lpc sniffer programm to.
+ * return: uint offset the program was put to. -2 on error.
+ */
+uint init_lpc_pio_programm(PIO pio) {
     printf("initializing the lpc bus sniffer program\n");
+
+    if (pio_can_add_program(pio, &lpc_bus_sniffer_program)) {
+        return pio_add_program(pio, &lpc_bus_sniffer_program);
+    }
+    printf("Error: pio program can not be loaded\n");
+    return 0x00;
+
+
+}
+
+int init_sm(PIO pio, uint offset, uint16_t lpcPort){
+
 
     int sm = pio_claim_unused_sm(pio, true);
     if(sm < 0){
         printf("Error: Cannot claim a free state machine\n");
         return -1;
-    }
-
-    if (pio_can_add_program(pio, &lpc_bus_sniffer_program)) {
-        offset = pio_add_program(pio, &lpc_bus_sniffer_program);
-    } else {
-        printf("Error: pio program can not be loaded\n");
-        return -2;
     }
 
     lpc_bus_sniffer_program_init(pio, sm, offset, LPC_BUS_PIN_BASE, LPC_BUS_PIN_COUNT, LED_POST_CODE_PIN_BASE, LED_POST_CODE_PIN_COUNT);
@@ -109,7 +116,7 @@ int init_lpc_bus_sniffer(PIO pio) {
     // Set Cycle/Dir (write: 0x2, read: 0x0)
     filter.val.cy_dir = 0x2;
     // Set I/O port address  (POST codes)
-    filter.val.addr = 0x80;
+    filter.val.addr = lpcPort;
     
     // Print filter (0x08002000)
     printf("Filter: 0x%08x\n", reverse_nibbles(filter.value));
@@ -129,7 +136,7 @@ bool repeating_timer_callback(struct repeating_timer *t) {
 int main() {
     // Initialize the GPIOs. 
     gpio_initialization();
-
+    pio_sm_config test = {};
     // Set the system frequency.
     set_sys_clock_khz(SYS_FREQ_IN_KHZ, true);
 
@@ -140,8 +147,20 @@ int main() {
 
     // Init the PIO
     PIO _pio0 = pio0;
-    int sm_lpc_bus_sniffer = init_lpc_bus_sniffer(_pio0);
-    if (sm_lpc_bus_sniffer < 0) return -1;
+    uint pioProgrammOffset = init_lpc_pio_programm(_pio0);
+    if (!pioProgrammOffset) return -1;
+
+    int sm_lpc_port80 = init_sm(_pio0, pioProgrammOffset, 0x80);
+    int sm_lpc_port81 = init_sm(_pio0, pioProgrammOffset, 0x81);
+    int sm_lpc_port82 = init_sm(_pio0, pioProgrammOffset, 0x82);
+    int sm_lpc_port83 = init_sm(_pio0, pioProgrammOffset, 0x83);
+
+    if (sm_lpc_port80 < 0) return -1;
+    if (sm_lpc_port81 < 0) return -1;
+    if (sm_lpc_port82 < 0) return -1;
+    if (sm_lpc_port83 < 0) return -1;
+
+    // TODO Error checking for the other SMs.
 
     // Print the  system frequency.
     printf("System clock is %u kHz\n", frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS));
@@ -157,9 +176,12 @@ int main() {
     printf("Starting to sample the POST codes.\n");
 
     while(1) {
-        if (!pio_sm_is_rx_fifo_empty(_pio0, sm_lpc_bus_sniffer)) {
-            uint32_t rxdata = _pio0->rxf[sm_lpc_bus_sniffer];
-            printf("data: %02x\n", rxdata);
+        if (!pio_sm_is_rx_fifo_empty(_pio0, sm_lpc_port80)) {
+            uint32_t rxPort80 = _pio0->rxf[sm_lpc_port80];
+            uint32_t rxPort81 = _pio0->rxf[sm_lpc_port81];
+            uint32_t rxPort82 = _pio0->rxf[sm_lpc_port82];
+            uint32_t rxPort83 = _pio0->rxf[sm_lpc_port83];
+            printf("data: %02x%02x%02x%02x\n",rxPort83, rxPort82, rxPort81, rxPort80);
         }
     }
 }
