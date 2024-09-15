@@ -16,3 +16,5 @@ Thumbs.db
 
 # Backup files
 *.bak
+
+cmake-build-debug
